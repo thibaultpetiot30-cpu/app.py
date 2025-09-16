@@ -108,6 +108,33 @@ with col2:
     st.markdown("**Factors**")
     st.dataframe(factors.head())
 
+# --- Rolling betas (stability over time)
+st.subheader("Rolling betas (stability over time)")
+asset_sel = st.selectbox("Select asset for rolling betas", list(pivot_ret.columns))
+win_rb = st.slider("Rolling window (periods)", 12, max(24, len(pivot_ret)-2), 24)
+
+if len(pivot_ret) > win_rb + 2:
+    dates_rb = pivot_ret.index
+    roll_betas = {f: [] for f in factor_cols}
+    rb_when = []
+    X_all = factors.values
+    y_all = pivot_ret[asset_sel].values
+    for t in range(win_rb, len(dates_rb)):
+        Xw = X_all[t-win_rb:t, :]
+        yw = y_all[t-win_rb:t]
+        b = np.linalg.lstsq(Xw, yw, rcond=None)[0]
+        for i, f in enumerate(factor_cols):
+            roll_betas[f].append(b[i])
+        rb_when.append(dates_rb[t])
+    fig_rb, ax_rb = plt.subplots()
+    for f in factor_cols:
+        ax_rb.plot(rb_when, roll_betas[f], label=f)
+    ax_rb.set_title(f"Rolling betas – {asset_sel}")
+    ax_rb.legend()
+    st.pyplot(fig_rb, clear_figure=True)
+else:
+    st.info("Increase data length or reduce the window to see rolling betas.")
+
 # ---------- Estimate betas (OLS, no intercept on purpose – returns explained by pure factors)
 X = factors.values  # T x K
 betas = {}
@@ -162,11 +189,41 @@ c1, c2 = st.columns([2,1])
 with c1:
     st.markdown("**Exposures (betas)**")
     st.dataframe(betas_df.round(3))
+
+# --- Heatmap – Exposures (betas)
+st.subheader("Heatmap – Exposures (betas)")
+fig_bh, ax_bh = plt.subplots()
+im = ax_bh.imshow(betas_df.values, aspect="auto")
+ax_bh.set_xticks(range(len(betas_df.columns)))
+ax_bh.set_xticklabels(betas_df.columns, rotation=45, ha="right")
+ax_bh.set_yticks(range(len(betas_df.index)))
+ax_bh.set_yticklabels(betas_df.index)
+ax_bh.set_title("Betas by asset/factor")
+plt.colorbar(im, ax=ax_bh, fraction=0.046, pad=0.04)
+st.pyplot(fig_bh, clear_figure=True)
+
 with c2:
     st.markdown("**Factor covariance (F)**")
     st.dataframe(F_cov_df.round(4))
     st.markdown("**Specific variances**")
     st.dataframe(spec_var_ser.round(6))
+
+# --- Heatmap – Factor correlation (from F_cov)
+st.subheader("Heatmap – Factor correlation")
+std_f = np.sqrt(np.diag(F_cov))
+D_inv = np.diag(1.0 / np.clip(std_f, 1e-12, None))
+F_corr = D_inv @ F_cov @ D_inv
+F_corr_df = pd.DataFrame(F_corr, index=factor_cols, columns=factor_cols)
+
+fig_fc, ax_fc = plt.subplots()
+im2 = ax_fc.imshow(F_corr_df.values, aspect="auto", vmin=-1, vmax=1)
+ax_fc.set_xticks(range(len(factor_cols)))
+ax_fc.set_xticklabels(factor_cols, rotation=45, ha="right")
+ax_fc.set_yticks(range(len(factor_cols)))
+ax_fc.set_yticklabels(factor_cols)
+ax_fc.set_title("Correlation between factors")
+plt.colorbar(im2, ax=ax_fc, fraction=0.046, pad=0.04)
+st.pyplot(fig_fc, clear_figure=True)
 
 # ---------- Portfolio weights (editable)
 st.subheader("Portfolio weights")
@@ -278,6 +335,22 @@ var_p = float(w.T @ cov_assets @ w)
 vol_p = np.sqrt(var_p)
 var_p_factor = float(w.T @ (B @ F_cov @ B.T) @ w)
 var_p_specific = float(w.T @ Delta @ w)
+
+# --- Radar chart – Portfolio factor exposure (β)
+st.subheader("Portfolio factor exposure – Radar")
+labels = list(factor_cols)
+num_vars = len(labels)
+angles = np.linspace(0, 2*np.pi, num_vars, endpoint=False).tolist()
+b_p_closed = np.concatenate([b_p, [b_p[0]]])
+angles_closed = angles + [angles[0]]
+
+fig_rad = plt.figure()
+ax_rad = plt.subplot(polar=True)
+ax_rad.plot(angles_closed, b_p_closed)
+ax_rad.fill(angles_closed, b_p_closed, alpha=0.1)
+ax_rad.set_thetagrids(np.degrees(angles), labels)
+ax_rad.set_title("Portfolio factor exposure (β)")
+st.pyplot(fig_rad, clear_figure=True)
 
 # --- Asset-level variance contributions (sum = total portfolio variance) ---
 Sigma = cov_assets  # N x N
