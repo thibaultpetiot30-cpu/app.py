@@ -322,6 +322,48 @@ with c3:
     ann_vol = vol_p * np.sqrt(12.0)  # if monthly data
     st.metric("Volatility (annualized, σ)", f"{ann_vol:.2%}")
 
+# --- Monte-Carlo risk (VaR / ES) ---
+st.subheader("Monte-Carlo risk (VaR / ES)")
+n_sims = st.slider("Simulations", 1000, 20000, 5000, 1000)
+alpha_label = st.selectbox("Confidence level", ["95%", "99%"], index=0)
+alpha = 0.95 if alpha_label == "95%" else 0.99
+
+K = len(factor_cols)
+
+# simulate factor returns ~ N(0, F_cov)
+try:
+    sim_f = np.random.multivariate_normal(mean=np.zeros(K), cov=F_cov, size=n_sims)
+except np.linalg.LinAlgError:
+    # small jitter in case F_cov is near-singular
+    F_cov_pd = F_cov + 1e-10 * np.eye(K)
+    sim_f = np.random.multivariate_normal(mean=np.zeros(K), cov=F_cov_pd, size=n_sims)
+
+# simulate idiosyncratic noise per asset
+spec_std = np.sqrt(np.diag(Delta))
+sim_u = np.random.normal(size=(n_sims, len(spec_std))) * spec_std  # n×N
+
+# asset returns & portfolio returns
+sim_R = sim_f @ B.T + sim_u            # n×N
+sim_rp = sim_R @ w                     # n
+
+# VaR / ES (loss = -return)
+q = np.quantile(sim_rp, 1 - alpha)
+var_mc = -q
+es_mc = -sim_rp[sim_rp <= q].mean() if (sim_rp <= q).any() else float("nan")
+
+c1, c2 = st.columns(2)
+with c1:
+    st.metric(f"VaR (MC, {alpha_label})", f"{var_mc:.2%}")
+with c2:
+    st.metric(f"ES (MC, {alpha_label})", f"{es_mc:.2%}" if np.isfinite(es_mc) else "n/a")
+
+# histogram
+fig_mc, ax_mc = plt.subplots()
+ax_mc.hist(sim_rp, bins=40)
+ax_mc.axvline(q, linestyle="--")
+ax_mc.set_title("Simulated portfolio returns")
+st.pyplot(fig_mc, clear_figure=True)
+
 st.markdown("**Decomposition**")
 st.write(f"- Factor variance: `{var_p_factor:.6f}`  |  Specific variance: `{var_p_specific:.6f}`")
 st.dataframe(rc_df.reset_index(drop=True).round(6))
