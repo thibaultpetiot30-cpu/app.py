@@ -212,6 +212,30 @@ for i, f in enumerate(factor_cols):
     shock.append(s * std_f[i])
 delta_f = np.array(shock)
 
+# --- Target / Hedge factor exposures (least-squares)
+st.sidebar.subheader("Target factor exposures (β*)")
+target = []
+for f in factor_cols:
+    target.append(st.sidebar.number_input(f"β* {f}", value=0.0, step=0.05))
+b_target = np.array(target)  # K
+
+if st.sidebar.button("Compute weights for β* (long-only approx)"):
+    B = betas_df.values           # N×K
+    A = B.T                       # K×N
+    lam = 1e-3
+    # Ridge LS with sum(w)=1 enforced by simple renormalization (approx long-only)
+    H = A.T @ A + lam * np.eye(A.shape[1])
+    c = A.T @ b_target
+    w_hat = np.linalg.solve(H, c)
+    w_hat = np.clip(w_hat, 0, None)
+    if w_hat.sum() == 0:
+        st.sidebar.warning("All-zero solution; relax targets or lam.")
+    else:
+        w_hat = w_hat / w_hat.sum()
+        weights_df["weight"] = w_hat
+        st.sidebar.success("Weights updated to target β*.") 
+        st.experimental_rerun()
+
 # portfolio factor exposure
 B = betas_df.values          # N × K
 b_p = (B.T @ w)              # K
