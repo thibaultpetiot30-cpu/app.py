@@ -166,6 +166,27 @@ b_p = (B.T @ w)              # K
 exp_dP = float(b_p @ delta_f)
 st.sidebar.metric("Scenario P&L (one period)", f"{exp_dP:.2%}")
 
+# --- Portfolio risk calculations (NE PAS DEPLACER) ---
+B = betas_df.values  # N x K
+Delta = np.diag(spec_var_ser.reindex(pivot_ret.columns).values)  # N x N
+cov_assets = B @ F_cov @ B.T + Delta
+
+var_p = float(w.T @ cov_assets @ w)
+vol_p = np.sqrt(var_p)
+var_p_factor = float(w.T @ (B @ F_cov @ B.T) @ w)
+var_p_specific = float(w.T @ Delta @ w)
+
+# --- Factor variance contributions RC_k = b_p[k] * (F b_p)[k] ---
+b_p = (B.T @ w)                # K vector = exposures of the portfolio
+Fb  = F_cov @ b_p
+rc_factors = b_p * Fb          # sums to var_p_factor
+rc_df = pd.DataFrame({"factor": factor_cols, "variance_contrib": rc_factors})
+rc_df = rc_df.sort_values("variance_contrib", ascending=False)
+if var_p_factor > 0:
+    rc_df["pct_of_factor_var"] = rc_df["variance_contrib"] / var_p_factor * 100.0
+else:
+    rc_df["pct_of_factor_var"] = 0.0
+
 # --- Portfolio risk calculations ---
 B = betas_df.values  # N x K
 Delta = np.diag(spec_var_ser.reindex(pivot_ret.columns).values)  # N x N
@@ -252,7 +273,7 @@ if do_bt and len(pivot_ret) > win + 2:
         pred_vol.append(np.sqrt(var_pred))
 
         # realized next-period absolute portfolio return as a proxy
-        rp_next = float((ret_wide.iloc[t+1, :].values @ w))
+        rp_next = float((pivot_ret.iloc[t+1, :].values @ w))
         real_vol.append(abs(rp_next))
 
         when.append(dates_bt[t+1])
