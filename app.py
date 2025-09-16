@@ -225,13 +225,13 @@ st.dataframe(rc_df.reset_index(drop=True).round(6))
 # --- Backtest: predicted vs realized volatility ---
 st.subheader("Backtest: predicted vs realized volatility")
 do_bt = st.checkbox("Run rolling backtest (one-step-ahead forecast)")
-win = st.slider("Estimation window (periods)", 12, max(24, len(ret_wide)-2), 24)
-if do_bt and len(ret_wide) > win + 2:
-    dates_bt = ret_wide.index
+win = st.slider("Estimation window (periods)", 12, max(24, len(pivot_ret)-2), 24)
+if do_bt and len(pivot_ret) > win + 2:
+    dates_bt = pivot_ret.index
     pred_vol, real_vol, when = [], [], []
     for t in range(win, len(dates_bt)-1):
         # window t-win..t-1 to estimate betas & factor covariance
-        Rw = ret_wide.iloc[t-win:t, :]
+        Rw = pivot_ret.iloc[t-win:t, :]
         Fw = factors.iloc[t-win:t, :]
         Xw = Fw.values
 
