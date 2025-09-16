@@ -375,6 +375,26 @@ axA.set_ylabel("Variance")
 axA.set_xlabel("Asset")
 st.pyplot(figA, clear_figure=True)
 
+# --- Asset variance breakdown: Factor vs Specific (Top 10)
+factor_var_diag = np.diag(B @ F_cov @ B.T)    # N
+spec_var_diag   = np.diag(Delta)              # N
+asset_var_df = pd.DataFrame({
+    "asset": pivot_ret.columns,
+    "factor_var": factor_var_diag,
+    "specific_var": spec_var_diag
+})
+asset_var_df["total_var"] = asset_var_df["factor_var"] + asset_var_df["specific_var"]
+asset_var_top = asset_var_df.sort_values("total_var", ascending=False).head(10)
+
+fig_sv, ax_sv = plt.subplots()
+ax_sv.bar(asset_var_top["asset"], asset_var_top["factor_var"])
+ax_sv.bar(asset_var_top["asset"], asset_var_top["specific_var"], bottom=asset_var_top["factor_var"])
+ax_sv.set_title("Top 10 asset variance: factor vs specific")
+ax_sv.set_xlabel("Asset")
+ax_sv.set_ylabel("Variance")
+ax_sv.tick_params(axis='x', rotation=45)
+st.pyplot(fig_sv, clear_figure=True)
+
 # Factor exposure of the **portfolio**
 b_p = (B.T @ w)                  # K x 1
 # Factor variance breakdown using risk contributions RC_k = b_p[k] * (F b_p)[k]
