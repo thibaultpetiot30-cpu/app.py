@@ -123,11 +123,14 @@ for asset in pivot_ret.columns:
 betas_df = pd.DataFrame(betas, index=factor_cols).T  # assets x factors
 spec_var_ser = pd.Series(spec_vars, name="spec_var")
 
-# --- Factor covariance: Sample / EWMA / Shrink-to-diagonal ---
+# --- Factor covariance: Sample / EWMA / Ledoit-Wolf (auto) ---
 st.sidebar.subheader("Factor covariance")
-cov_method = st.sidebar.selectbox("Method", ["Sample (unweighted)", "EWMA (half-life)", "Shrink to diagonal (alpha)"])
+cov_method = st.sidebar.selectbox(
+    "Method",
+    ["Sample (unweighted)", "EWMA (half-life)", "Ledoit-Wolf (auto-shrink)"]
+)
 
-X = factors.values  # T × K
+X = factors.values  # shape = (T samples, K factors)
 K = X.shape[1]
 
 if cov_method == "EWMA (half-life)":
@@ -141,12 +144,15 @@ if cov_method == "EWMA (half-life)":
     for t in range(Tn):
         xt = Xc[t:t+1].T
         F_cov += wts[t] * (xt @ xt.T)
-elif cov_method == "Shrink to diagonal (alpha)":
-    alpha = st.sidebar.slider("Alpha (0=no shrink, 0.9=heavy)", 0.0, 0.9, 0.2, 0.05)
-    F_samp = np.cov(X.T, ddof=1)
-    F_diag = np.diag(np.diag(F_samp))
-    F_cov = (1 - alpha) * F_samp + alpha * F_diag
-else:
+
+elif cov_method == "Ledoit-Wolf (auto-shrink)":
+    # scikit-learn expects (n_samples, n_features) -> ici (T, K)
+    from sklearn.covariance import LedoitWolf
+    lw = LedoitWolf().fit(X)
+    F_cov = lw.covariance_
+
+else:  # "Sample (unweighted)"
+    # np.cov attend les variables en lignes -> transpose
     F_cov = np.cov(X.T, ddof=1)
 
 F_cov_df = pd.DataFrame(F_cov, index=factor_cols, columns=factor_cols)
