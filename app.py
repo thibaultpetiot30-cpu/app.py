@@ -123,9 +123,9 @@ for asset in pivot_ret.columns:
 betas_df = pd.DataFrame(betas, index=factor_cols).T  # assets x factors
 spec_var_ser = pd.Series(spec_vars, name="spec_var")
 
-# --- Factor covariance: Sample vs EWMA
+# --- Factor covariance: Sample / EWMA / Shrink-to-diagonal ---
 st.sidebar.subheader("Factor covariance")
-cov_method = st.sidebar.selectbox("Method", ["Sample (unweighted)", "EWMA (half-life)"])
+cov_method = st.sidebar.selectbox("Method", ["Sample (unweighted)", "EWMA (half-life)", "Shrink to diagonal (alpha)"])
 
 X = factors.values  # T × K
 K = X.shape[1]
@@ -141,6 +141,11 @@ if cov_method == "EWMA (half-life)":
     for t in range(Tn):
         xt = Xc[t:t+1].T
         F_cov += wts[t] * (xt @ xt.T)
+elif cov_method == "Shrink to diagonal (alpha)":
+    alpha = st.sidebar.slider("Alpha (0=no shrink, 0.9=heavy)", 0.0, 0.9, 0.2, 0.05)
+    F_samp = np.cov(X.T, ddof=1)
+    F_diag = np.diag(np.diag(F_samp))
+    F_cov = (1 - alpha) * F_samp + alpha * F_diag
 else:
     F_cov = np.cov(X.T, ddof=1)
 
