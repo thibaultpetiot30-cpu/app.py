@@ -166,14 +166,27 @@ b_p = (B.T @ w)              # K
 exp_dP = float(b_p @ delta_f)
 st.sidebar.metric("Scenario P&L (one period)", f"{exp_dP:.2%}")
 
-# --- Asset-level variance contributions (sum = var_p)
-Sigma = cov_assets
+# --- Portfolio risk calculations ---
+B = betas_df.values  # N x K
+Delta = np.diag(spec_var_ser.reindex(pivot_ret.columns).values)  # N x N
+cov_assets = B @ F_cov @ B.T + Delta
+var_p = float(w.T @ cov_assets @ w)
+vol_p = np.sqrt(var_p)
+var_p_factor = float(w.T @ (B @ F_cov @ B.T) @ w)
+var_p_specific = float(w.T @ Delta @ w)
+
+# --- Asset-level variance contributions (sum = total portfolio variance) ---
+Sigma = cov_assets  # N x N
 asset_contrib = w * (Sigma @ w)
+
 asset_contrib_df = pd.DataFrame({
-    "asset": ret_wide.columns,
+    "asset": pivot_ret.columns,
     "var_contrib": asset_contrib,
-    "pct_total_var": asset_contrib / var_p * 100 if var_p > 0 else 0.0
-}).sort_values("var_contrib", ascending=False)
+})
+asset_contrib_df["pct_total_var"] = (
+    asset_contrib_df["var_contrib"] / var_p * 100.0 if var_p > 0 else 0.0
+)
+asset_contrib_df = asset_contrib_df.sort_values("var_contrib", ascending=False)
 
 st.subheader("Asset-level risk contributions")
 st.dataframe(asset_contrib_df.head(10).round(6))
