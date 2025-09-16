@@ -101,8 +101,27 @@ for asset in pivot_ret.columns:
 betas_df = pd.DataFrame(betas, index=factor_cols).T  # assets x factors
 spec_var_ser = pd.Series(spec_vars, name="spec_var")
 
-# Factor covariance (sample)
-F_cov = np.cov(X.T, ddof=1)
+# --- Factor covariance: Sample vs EWMA
+st.sidebar.subheader("Factor covariance")
+cov_method = st.sidebar.selectbox("Method", ["Sample (unweighted)", "EWMA (half-life)"])
+
+X = factors.values  # T × K
+K = X.shape[1]
+
+if cov_method == "EWMA (half-life)":
+    hl = st.sidebar.slider("Half-life (periods)", 3, 60, 12)
+    lam = 0.5 ** (1.0 / hl)
+    Xc = X - X.mean(axis=0, keepdims=True)
+    Tn = Xc.shape[0]
+    wts = np.array([lam ** (Tn-1-t) for t in range(Tn)], dtype=float)
+    wts /= wts.sum()
+    F_cov = np.zeros((K, K))
+    for t in range(Tn):
+        xt = Xc[t:t+1].T
+        F_cov += wts[t] * (xt @ xt.T)
+else:
+    F_cov = np.cov(X.T, ddof=1)
+
 F_cov_df = pd.DataFrame(F_cov, index=factor_cols, columns=factor_cols)
 
 st.subheader("Estimated exposures (betas) & risks")
@@ -132,20 +151,39 @@ if w.sum() == 0:
     st.error("All weights are zero. Please set some positive weights.")
     st.stop()
 w = w / w.sum()
-weights_df["weight_norm"] = w
-st.write("**Normalized weights (sum to 1):**")
-st.dataframe(weights_df.round(6))
+# --- Factor shock scenario (Δf in standard deviations)
+st.sidebar.subheader("Factor shock scenario (Δf)")
+std_f = np.sqrt(np.diag(F_cov))
+shock = []
+for i, f in enumerate(factor_cols):
+    s = st.sidebar.slider(f"{f} shock (in σ)", -3.0, 3.0, 0.0, 0.1)
+    shock.append(s * std_f[i])
+delta_f = np.array(shock)
 
-# ---------- Risk calculations
-B = betas_df.values                           # N x K
-Delta = np.diag(spec_var_ser.reindex(pivot_ret.columns).values)  # N x N
-cov_assets = B @ F_cov @ B.T + Delta          # N x N
-var_p = float(w.T @ cov_assets @ w)
-vol_p = np.sqrt(var_p)
+# portfolio factor exposure
+B = betas_df.values          # N × K
+b_p = (B.T @ w)              # K
+exp_dP = float(b_p @ delta_f)
+st.sidebar.metric("Scenario P&L (one period)", f"{exp_dP:.2%}")
 
-# Factor-only variance part
-var_p_factor = float(w.T @ (B @ F_cov @ B.T) @ w)
-var_p_specific = float(w.T @ Delta @ w)
+# --- Asset-level variance contributions (sum = var_p)
+Sigma = cov_assets
+asset_contrib = w * (Sigma @ w)
+asset_contrib_df = pd.DataFrame({
+    "asset": ret_wide.columns,
+    "var_contrib": asset_contrib,
+    "pct_total_var": asset_contrib / var_p * 100 if var_p > 0 else 0.0
+}).sort_values("var_contrib", ascending=False)
+
+st.subheader("Asset-level risk contributions")
+st.dataframe(asset_contrib_df.head(10).round(6))
+
+figA, axA = plt.subplots()
+axA.bar(asset_contrib_df["asset"].head(10), asset_contrib_df["var_contrib"].head(10))
+axA.set_title("Top 10 asset variance contributions")
+axA.set_ylabel("Variance")
+axA.set_xlabel("Asset")
+st.pyplot(figA, clear_figure=True)
 
 # Factor exposure of the **portfolio**
 b_p = (B.T @ w)                  # K x 1
@@ -171,24 +209,56 @@ st.markdown("**Decomposition**")
 st.write(f"- Factor variance: `{var_p_factor:.6f}`  |  Specific variance: `{var_p_specific:.6f}`")
 st.dataframe(rc_df.reset_index(drop=True).round(6))
 
-# ---------- Plots
-st.subheader("Charts")
-c1, c2 = st.columns(2)
-with c1:
-    # Factor contributions bar
-    fig1, ax1 = plt.subplots()
-    ax1.bar(rc_df["factor"], rc_df["variance_contrib"])
-    ax1.set_title("Factor Variance Contributions")
-    ax1.set_ylabel("Variance")
-    ax1.set_xlabel("Factor")
-    st.pyplot(fig1, clear_figure=True)
+# --- Backtest: predicted vs realized volatility ---
+st.subheader("Backtest: predicted vs realized volatility")
+do_bt = st.checkbox("Run rolling backtest (one-step-ahead forecast)")
+win = st.slider("Estimation window (periods)", 12, max(24, len(ret_wide)-2), 24)
+if do_bt and len(ret_wide) > win + 2:
+    dates_bt = ret_wide.index
+    pred_vol, real_vol, when = [], [], []
+    for t in range(win, len(dates_bt)-1):
+        # window t-win..t-1 to estimate betas & factor covariance
+        Rw = ret_wide.iloc[t-win:t, :]
+        Fw = factors.iloc[t-win:t, :]
+        Xw = Fw.values
 
-with c2:
-    # Pie: factor vs specific
-    fig2, ax2 = plt.subplots()
-    ax2.pie([var_p_factor, var_p_specific], labels=["Factor", "Specific"], autopct="%1.1f%%", startangle=90)
-    ax2.set_title("Total Variance Split")
-    st.pyplot(fig2, clear_figure=True)
+        # betas (OLS, no intercept)
+        Bw = []
+        for asset in Rw.columns:
+            yw = Rw[asset].values
+            bw = np.linalg.lstsq(Xw, yw, rcond=None)[0]
+            Bw.append(bw)
+        Bw = np.array(Bw)  # N × K
+
+        # factor covariance on the window
+        Fw_cov = np.cov(Xw.T, ddof=1)
+
+        # one-step-ahead risk forecast using current weights w
+        cov_assets_w = Bw @ Fw_cov @ Bw.T
+        var_pred = float(w.T @ cov_assets_w @ w)
+        pred_vol.append(np.sqrt(var_pred))
+
+        # realized next-period absolute portfolio return as a proxy
+        rp_next = float((ret_wide.iloc[t+1, :].values @ w))
+        real_vol.append(abs(rp_next))
+
+        when.append(dates_bt[t+1])
+
+    bt = pd.DataFrame({
+        "date": when,
+        "pred_vol": pred_vol,
+        "realized_abs_ret": real_vol
+    }).set_index("date")
+
+    # plot
+    figbt, axbt = plt.subplots()
+    axbt.plot(bt.index, bt["pred_vol"], label="Predicted σ (t→t+1)")
+    axbt.plot(bt.index, bt["realized_abs_ret"], label="|Realized return| (t+1)")
+    axbt.set_title("Backtest: risk forecast vs realized")
+    axbt.legend()
+    st.pyplot(figbt, clear_figure=True)
+
+    st.dataframe(bt.tail().round(6))
 
 # ---------- Downloads
 st.subheader("Download results")
