@@ -18,29 +18,51 @@ Columns required:
 Tip: factors are **auto-detected** by the prefix `factor_`.
 """)
 
-# ---------- Sidebar
+# ---------- Sidebar (demo loader) ----------
 st.sidebar.header("Load data")
+
+def make_demo_df():
+    import numpy as np, pandas as pd
+    np.random.seed(7)
+    T, N = 36, 15
+    dates = pd.date_range('2022-01-31', periods=T, freq='M')
+    # 3 factors: Mkt, SMB, HML
+    F_cov = np.array([[0.035,0.010,0.006],
+                      [0.010,0.025,0.004],
+                      [0.006,0.004,0.020]])
+    F = np.random.multivariate_normal([0,0,0], F_cov, size=T)
+    Fdf = pd.DataFrame(F, index=dates, columns=['factor_Mkt','factor_SMB','factor_HML'])
+    beta = np.column_stack([
+        np.random.normal(1.0,0.25,N),
+        np.random.normal(0.0,0.35,N),
+        np.random.normal(0.0,0.30,N),
+    ])
+    assets = [f"Stock_{i+1:02d}" for i in range(N)]
+    spec_vol = np.random.uniform(0.06,0.18,N)
+    U = np.random.normal(size=(T,N)) @ np.diag(spec_vol)
+    R = F @ beta.T + U
+    Rdf = pd.DataFrame(R, index=dates, columns=assets)
+    rows=[]
+    for d in dates:
+        for a in assets:
+            rows.append([d.date().isoformat(),
+                         Fdf.loc[d,'factor_Mkt'], Fdf.loc[d,'factor_SMB'], Fdf.loc[d,'factor_HML'],
+                         a, Rdf.loc[d,a]])
+    return pd.DataFrame(rows, columns=['date','factor_Mkt','factor_SMB','factor_HML','asset','return'])
+
 demo_btn = st.sidebar.button("Use built-in demo dataset (15 assets × 36 months × 3 factors)")
 uploaded = st.sidebar.file_uploader("...or upload your CSV", type="csv")
-st.sidebar.markdown("Need a sample? Download one below and re-upload it.")
 
-# ---------- Load data
 if demo_btn:
-    url = None
-    st.session_state["df"] = None  # reset
-    st.sidebar.success("Scroll down and click the demo download link in the main page, then re-upload it here if you want.")
+    st.session_state["df"] = make_demo_df()
+    st.sidebar.success("Demo dataset loaded!")
 elif uploaded:
     try:
-        df = pd.read_csv(uploaded)
-        st.session_state["df"] = df
+        st.session_state["df"] = pd.read_csv(uploaded)
     except Exception as e:
         st.error(f"Failed to read CSV: {e}")
 else:
     st.session_state.setdefault("df", None)
-
-st.markdown("#### Download a big sample dataset")
-st.write("Use this file for a convincing live demo (15 assets × 36 months × 3 factors):")
-st.link_button("Download mini_barra_big_sample.csv", "sandbox:/mnt/data/mini_barra_big_sample.csv")
 
 df = st.session_state["df"]
 if df is None:
