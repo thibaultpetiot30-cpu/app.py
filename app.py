@@ -184,6 +184,25 @@ if w.sum() == 0:
     st.error("All weights are zero. Please set some positive weights.")
     st.stop()
 w = w / w.sum()
+
+# --- Risk-Parity weights helper ---
+def risk_parity_weights(Sigma, max_iter=1000, tol=1e-8):
+    N = Sigma.shape[0]
+    w = np.ones(N) / N
+    for _ in range(max_iter):
+        mrc = Sigma @ w                 # marginal risk contributions
+        rc = w * mrc                    # risk contributions
+        target = rc.mean()
+        new_w = w * (target / np.clip(rc, 1e-12, None))
+        new_w = np.clip(new_w, 0, None)
+        new_w = new_w / new_w.sum()
+        if np.linalg.norm(new_w - w, 1) < tol:
+            break
+        w = new_w
+    return w
+
+Sigma_preview = None  # will be set after we compute Sigma below
+
 # --- Factor shock scenario (Δf in standard deviations)
 st.sidebar.subheader("Factor shock scenario (Δf)")
 std_f = np.sqrt(np.diag(F_cov))
@@ -208,6 +227,13 @@ var_p = float(w.T @ cov_assets @ w)
 vol_p = np.sqrt(var_p)
 var_p_factor = float(w.T @ (B @ F_cov @ B.T) @ w)
 var_p_specific = float(w.T @ Delta @ w)
+
+# --- Button: set Risk-Parity weights ---
+if st.button("Set weights = Risk-Parity"):
+    Sigma_preview = cov_assets
+    w_rp = risk_parity_weights(Sigma_preview)
+    weights_df["weight"] = w_rp
+    st.experimental_rerun()
 
 # --- Factor variance contributions RC_k = b_p[k] * (F b_p)[k] ---
 b_p = (B.T @ w)                # K vector = exposures of the portfolio
